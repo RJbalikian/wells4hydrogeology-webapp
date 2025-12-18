@@ -41,8 +41,8 @@ def get_defaults():
             paramDefaultDict[p] = defaults[i]
     return paramDefaultDict
 
-st.session_state.param_defaults = get_defaults()
-    
+st.session_state.param_defaults = param_defs = get_defaults()
+
 def w4hrun():
     stss = st.session_state
     st.toast('Processing')
@@ -80,6 +80,24 @@ def w4hrun():
         # FIX THIS
         stss.model_grid = rxr.open_rasterio(stss.model_grid_TEXT)
     
+    w4hrun_kwargs = {}
+    for paramName, defaultVal in stss.param_defaults.items():
+        if paramName not in specified_params:
+            if hasattr(st.session_state, paramName):
+                if stss[paramName] != defaultVal:
+                    w4hrun_kwargs[paramName] = stss[paramName]
+    
+    # Code to print out what is not default value
+
+    # Specify unmodifiable kwargs
+    static_kws = ['well_data', 'surf_elev_grid', 'bedrock_elev_grid', 'model_grid']
+    for kw in static_kws:
+        w4hrun_kwargs[kw] = stss['kw']
+    with st.spinner('Processing data', show_time=True):
+        st.status('Running')
+        st.session_state.results = w4h.run(**w4hrun_kwargs)
+    st.success()
+    
 def main():
     st.set_page_config(page_title='W4H WebApp',
                        page_icon=":material/globe_book:",
@@ -91,9 +109,9 @@ def main():
     with st.sidebar:
         sampleCol, headerCol  = st.columns([0.7, 0.3], vertical_alignment='top')
         with headerCol.container(horizontal_alignment='right'):
-            st.button('Run Analysis', type='primary', on_click=w4hrun)
+            st.button('Run Analysis', type='primary', on_click=w4hrun, key='run_button')
         with sampleCol.container(horizontal_alignment='right'):
-            st.checkbox('Demo run', disabled=True, value=False)
+            st.checkbox('Demo run', disabled=True, value=False, key='demo_check')
         st.header("Specify Input Data", divider='rainbow')
         
 
@@ -136,16 +154,20 @@ def main():
             brval = None
             if hasattr(st.session_state, 'lower_rast_UL') and st.session_state.lower_rast_UL is not None:
                 brval = st.session_state.lower_rast_UL.name
-            brtab.text_input(label="Lower Raster file", value=brval, key='lower_rast_TEXT')
+            brtab.text_input(label="Lower Raster File", value=brval, key='lower_rast_TEXT')
             brtab.file_uploader(label='Upload Lower Elevation Raster', key='lower_rast_UL')
 
         with st.expander("Extent and Resolution"):
-            st.file_uploader(label='Study Area File', key='study_area')
+            saval = None
+            if hasattr(st.session_state, 'study_area_ul') and st.session_state.lower_rast_UL is not None:
+                saval = st.session_state.study_area_ul.name
+            st.text_input(label="Study Area File", value=saval, key='study_area_TEXT')            
+            st.file_uploader('Upload Study Area File', key='study_area_ul')
             st.header('Model Grid')
             st.selectbox("Model Grid Source", 
-                    options=["Lower Surface", "Surface Elevation",
-                             "Raster Upload", "# Nodes", "Node Resolution"],
-                     index=0, key='model_type')
+                         options=["Lower Surface", "Surface Elevation",
+                                  "Raster Upload", "# Nodes", "Node Size"],
+                         index=0, key='model_type')
             if 'node' not in st.session_state.model_type.lower():
                 if st.session_state.model_type == 'Raster Upload':
                     mgval = None
@@ -157,14 +179,14 @@ def main():
                 xnodecol, ynodecol = st.columns([0.5, 0.5])
                 xnodeLabel = 'No. X Nodes'
                 ynodeLabel = 'No. Y Nodes'
-                if st.session_state.model_type == 'Node Resolution':
-                    xnodeLabel = 'X Node Resolution'
-                    ynodeLabel = 'Y Node Resolution'
+                if st.session_state.model_type == 'Node Size':
+                    xnodeLabel = 'X Node Size'
+                    ynodeLabel = 'Y Node Size'
 
                 xnodecol.number_input(xnodeLabel, min_value=5, max_value=5000,
-                                      step=1, value=100)
+                                      step=1, value=100, key='x_node_step')
                 ynodecol.number_input(ynodeLabel, min_value=5, max_value=5000,
-                                      step=1, value=100)
+                                      step=1, value=100, key='y_node_step')
         
         with st.expander("Data Mapping", expanded=True):
             widcol, descol = st.columns([0.5, 0.5])
