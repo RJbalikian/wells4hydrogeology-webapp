@@ -70,13 +70,15 @@ def w4hrun():
         # FIX code to generate model grid from node spacing or number
         pass
     elif stss.model_type == 'Surface Elevation':
-        # CODE TO READ SURFACE ELEVATION
+        # CODE TO copy SURFACE ELEVATION grid
         pass
     elif stss.model_type == 'Lower Surface':
-        # CODE TO READ SURFACE ELEVATION
+        # CODE TO copy SURFACE ELEVATION grid
         pass
     else:
-        stss.model_grid_TEXT
+        # Code to read raster
+        # FIX THIS
+        stss.model_grid = rxr.open_rasterio(stss.model_grid_TEXT)
     
 def main():
     st.set_page_config(page_title='W4H WebApp',
