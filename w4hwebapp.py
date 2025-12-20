@@ -1,5 +1,8 @@
+import copy
 import inspect
 import io
+import pathlib
+import tempfile
 
 import pandas as pd
 import pyproj
@@ -16,6 +19,8 @@ GMRT_BASE_URL = r"https://www.gmrt.org:443/services/GridServer?minlongitude&maxl
 
 DEFAULT_POINTS_CRS = "WGS 84 (EPSG:4326)"
 DEFAULT_POINTS_CRS_INDEX = CRS_STR_LIST.index(DEFAULT_POINTS_CRS)
+
+VERBOSE = False
 
 def get_defaults():
     w4h_funs = [w4h.file_setup, w4h.read_raw_csv, w4h.define_dtypes, w4h.merge_metadata, w4h.coords2geometry,
@@ -42,6 +47,108 @@ def get_defaults():
     return paramDefaultDict
 
 st.session_state.param_defaults = param_defs = get_defaults()
+
+
+def on_point_file_upload():
+    file = st.session_state.point_file_ul
+    temp_dir = tempfile.mkdtemp()
+    path = pathlib.Path(temp_dir).joinpath(file.name)
+    with open(path, "wb") as f:
+            f.write(file.getvalue())
+    if VERBOSE:
+        print(file.name)
+    st.session_state.well_data = path.as_posix()
+
+def demo_checked():
+    doDemo = st.session_state.demo_check
+
+    resources = w4h.get_resources(scope='local')
+
+    well_data_file = resources['well_data']
+    if doDemo:
+        st.session_state.well_data = pathlib.Path(well_data_file).as_posix()
+
+        st.session_state.surf_raster_type = 'Web Service'
+        st.session_state.pre_service = 'ISGS Lidar'
+
+def surf_raster_type_changed():
+    if st.session_state.surf_raster_type != "File":
+        surf_raster_source_uploaded()
+        service_changed()
+    
+    else: # st.session_state.surf_raster_type == "File":
+        surf_raster_source_uploaded()
+        service_changed()
+
+        # Save service state
+        if hasattr(st.session_state, 'pre_service'):
+            st.session_state.preCServ = st.session_state.pre_service
+
+        if hasattr(st.session_state, 'surf_rast_ul_obj_name'):
+            st.session_state.surf_raster_source = st.session_state.surf_rast_ul_obj_name
+        
+
+def service_changed():
+    if hasattr(st.session_state, 'preCServ') and not hasattr(st.session_state, 'pre_service'):
+        srserve = st.session_state.preCServ
+        if 'ISGS' in srserve:
+            st.session_state.surf_raster_source = IL_LIDAR_URL
+            st.session_state.surf_raster_CRS = "WGS 84 / Pseudo-Mercator (EPSG:3857)"
+        elif "GMRT" in srserve:
+            st.session_state.surf_raster_source = GMRT_BASE_URL
+            st.session_state.surf_raster_CRS = "WGS 84 (EPSG:4326)"
+    elif hasattr(st.session_state, 'pre_service'):
+        st.session_state.preCServ = st.session_state.pre_service
+        srserve = st.session_state.preCServ
+        if 'ISGS' in srserve:
+            st.session_state.surf_raster_source = IL_LIDAR_URL
+            st.session_state.surf_raster_CRS = "WGS 84 / Pseudo-Mercator (EPSG:3857)"
+        elif "GMRT" in srserve:
+            st.session_state.surf_raster_source = GMRT_BASE_URL
+            st.session_state.surf_raster_CRS = "WGS 84 (EPSG:4326)"
+    
+    on_surf_raster_source_change()
+
+def surf_raster_source_uploaded():
+    if hasattr(st.session_state, 'surf_rast_ul'):
+        st.session_state.surf_rast_ul_obj = copy.deepcopy(st.session_state.surf_rast_ul)
+    on_surf_raster_source_change()
+    
+def on_surf_raster_source_change():
+    rType = st.session_state.surf_raster_type
+    rsource = st.session_state.surf_raster_source
+
+    st.write("ON SURF RAST SOURCE CHAGNE")
+    st.write(st.session_state.surf_raster_type)
+
+
+    if rType == "File":
+        print("FILE")
+        if not hasattr(st.session_state, 'surf_rast_ul') and  hasattr(st.session_state, 'surf_rast_ul_name'):
+            st.session_state.surf_raster_source = pathlib.Path(st.session_state.surf_rast_ul_name).as_posix()
+
+        if hasattr(st.session_state, 'surf_rast_ul') and st.session_state.surf_rast_ul is not None:
+            st.write(pathlib.Path(st.session_state.surf_rast_ul.name).as_posix())
+            st.session_state.surf_raster_source = pathlib.Path(st.session_state.surf_rast_ul.name).as_posix()
+        elif hasattr(st.session_state, 'surf_rast_ul_name'):
+            st.session_state.surf_raster_source = pathlib.Path(st.session_state.surf_rast_ul_name).as_posix()
+        else:
+            st.session_state.surf_raster_source = 'None'
+    else:
+        if hasattr(st.session_state, 'surf_rast_ul') and st.session_state.surf_rast_ul is not None:
+            st.session_state.surf_rast_ul_name = st.session_state.surf_rast_ul.name
+
+        if hasattr(st.session_state, 'pre_service'):
+            srserve = st.session_state.pre_service
+            if 'ISGS' in srserve:
+                st.session_state.pre_service = 'ISGS Lidar'
+                st.session_state.surf_raster_CRS = "WGS 84 / Pseudo-Mercator (EPSG:3857)"
+                st.session_state.surf_raster_source = IL_LIDAR_URL
+            elif "GMRT" in srserve:
+                st.session_state.pre_service = 'GMRT'
+                st.session_state.surf_raster_source = GMRT_BASE_URL
+                st.session_state.surf_raster_CRS = "WGS 84 (EPSG:4326)"
+
 
 def w4hrun():
     stss = st.session_state
@@ -97,8 +204,9 @@ def w4hrun():
         st.status('Running')
         st.session_state.results = w4h.run(**w4hrun_kwargs)
     st.success()
-    
+
 def main():
+
     st.set_page_config(page_title='W4H WebApp',
                        page_icon=":material/globe_book:",
                        layout='wide',
@@ -111,39 +219,72 @@ def main():
         with headerCol.container(horizontal_alignment='right'):
             st.button('Run Analysis', type='primary', on_click=w4hrun, key='run_button')
         with sampleCol.container(horizontal_alignment='right'):
-            st.checkbox('Demo run', disabled=True, value=False, key='demo_check')
+            st.checkbox('Demo run', disabled=False, value=False, key='demo_check', 
+                        on_change=demo_checked)
         st.header("Specify Input Data", divider='rainbow')
         
 
         with st.expander("Well Data", expanded=True):
             wdval = None
-            if hasattr(st.session_state, 'point_file') and st.session_state.point_file is not None:
-                wdval = st.session_state.point_file.name
+            if hasattr(st.session_state, 'point_file_ul') and st.session_state.point_file_ul is not None:
+                wdval = st.session_state.point_file_ul.name
             st.text_input(label="Well data file", value=wdval, key='well_data')
-            st.file_uploader(label='Upload Point File', key='point_file')
+            st.file_uploader(label='Upload Point File', key='point_file_ul',
+                            on_change=on_point_file_upload)
 
         with st.expander("Raster Data", expanded=True):
             st.header('Raster Data')
             surfTab, brtab = st.tabs(["Surface Raster", "Lower Raster"])
             surfTab.segmented_control(label='Select Raster Type', options=['File', 'Web Service'], 
-                                      key='surf_raster_type', default='Web Service')
+                                      key='surf_raster_type', default='Web Service',
+                                      on_change=surf_raster_type_changed)
+
             if st.session_state.surf_raster_type == 'File':
                 srval = None
                 if hasattr(st.session_state, 'surf_rast_ul') and st.session_state.surf_rast_ul is not None:
                     srval = st.session_state.surf_rast_ul.name
-                surfTab.text_input(label="Surface Raster file", value=srval)
-                surfTab.file_uploader(label='Upload Surface Elevation Raster', key='surf_rast_ul')
+                surfTab.text_input(label="Surface Raster file", value=srval, key='surf_raster_source',
+                                    on_change=on_surf_raster_source_change)
+                surfTab.file_uploader(label='Upload Surface Elevation Raster', key='surf_rast_ul',
+                                        on_change=surf_raster_source_uploaded)
 
             else:
-                surfTab.radio(label='Surface Raster Services', options=['GMRT', 'IL Lidar', "Custom"], horizontal=True,
-                            key='pre_service')
+                srsInd = 0
+                if hasattr(st.session_state, 'preCServ') and not hasattr(st.session_state, 'pre_service'):
+                    srserve = st.session_state.preCServ
+                    if 'ISGS' in srserve:
+                        srsInd = 1
+                    elif "Custom" in srserve:
+                        srsInd = 2
+
+                surfTab.radio(label='Surface Raster Services', 
+                            options=['GMRT', 'ISGS Lidar', "Custom"], index=srsInd,
+                            horizontal=True, 
+                            key='pre_service', on_change=service_changed)
                 servTextDisabled = False
                 if st.session_state.pre_service != 'Custom':
                     servTextDisabled = True
-                surfTab.text_input(label='Enter Service URL (currenly only WMS supported)',
-                                    disabled=servTextDisabled)
+                
+                srval = None
+                if "ISGS" in st.session_state.pre_service:
+                    srval = IL_LIDAR_URL
+                elif "GMRT" in st.session_state.pre_service:
+                    srval = GMRT_BASE_URL
+
+                surfTab.text_input(label='Specify Surface Raster Service URL (Currently only WMS supported)',
+                                   value=srval,
+                                   key='surf_raster_source')
+
+                if hasattr(st.session_state, "surf_service_url"):
+                    if st.session_state.pre_service == "GMRT":
+                        st.session_state.surf_service_url = GMRT_BASE_URL
+                    elif st.session_state.pre_service == "ISGS Lidar":
+                        st.session_state.surf_service_url = IL_LIDAR_URL
+
+
+
             specSurfRastCol, surfRastCRSCol = surfTab.columns([0.3, 0.7])
-            specSurfRastCol.toggle('Specify Raster CRS', key='specify_surfrast_crs')
+            specSurfRastCol.toggle('Specify Surface Raster CRS', key='specify_surfrast_crs')
 
             surfRastCRSDisabled =  not st.session_state.specify_surfrast_crs
             surfRastCRSCol.selectbox("Surface Raster CRS", disabled = surfRastCRSDisabled,
