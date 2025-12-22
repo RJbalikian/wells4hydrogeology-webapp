@@ -2,14 +2,28 @@ import copy
 import inspect
 import io
 import pathlib
+import sys
 import tempfile
 
+import geopandas as gpd
+import matplotlib.pyplot as plt
+from owslib.wms import WebMapService
 import pandas as pd
 import pyproj
 import rioxarray as rxr
 import streamlit as st
-import w4h
 import xarray as xr
+
+try:
+    import w4h
+    #from w4h import sprit_hvsr
+    #from w4h import sprit_plot
+except Exception:
+    parent_dir = pathlib.Path(__file__).absolute().parent.parent.as_posix()
+    sys.path.insert(0, parent_dir)
+    import w4h
+
+    
 
 CRS_LIST = pyproj.database.query_crs_info()
 CRS_STR_LIST = [f"{crs.name} ({crs.auth_name}:{crs.code})" for crs in CRS_LIST]
@@ -19,6 +33,8 @@ GMRT_BASE_URL = r"https://www.gmrt.org:443/services/GridServer?minlongitude&maxl
 
 DEFAULT_POINTS_CRS = "WGS 84 (EPSG:4326)"
 DEFAULT_POINTS_CRS_INDEX = CRS_STR_LIST.index(DEFAULT_POINTS_CRS)
+
+RESOURCES = w4h.get_resources(scope='local')
 
 VERBOSE = False
 
@@ -59,17 +75,31 @@ def on_point_file_upload():
         print(file.name)
     st.session_state.well_data = path.as_posix()
 
+
 def demo_checked():
     doDemo = st.session_state.demo_check
 
-    resources = w4h.get_resources(scope='local')
 
-    well_data_file = resources['well_data']
+    well_data_file = RESOURCES['well_data']
     if doDemo:
+        # Well data
         st.session_state.well_data = pathlib.Path(well_data_file).as_posix()
 
+        # Surface raster
         st.session_state.surf_raster_type = 'Web Service'
         st.session_state.pre_service = 'ISGS Lidar'
+        st.session_state.surf_raster_source = IL_LIDAR_URL
+
+        # Bedrock raster
+        st.session_state.lower_rast_TEXT = RESOURCES['bedrock_elev'].as_posix()
+
+        # Model grid
+        st.session_state.model_type = 'Raster Upload'
+        st.session_state.model_grid_TEXT = RESOURCES['model_grid'].as_posix()
+
+        # Study area
+        st.session_state.study_area_TEXT = RESOURCES['study_area'].as_posix()
+
 
 def surf_raster_type_changed():
     if st.session_state.surf_raster_type != "File":
@@ -86,7 +116,7 @@ def surf_raster_type_changed():
 
         if hasattr(st.session_state, 'surf_rast_ul_obj_name'):
             st.session_state.surf_raster_source = st.session_state.surf_rast_ul_obj_name
-        
+
 
 def service_changed():
     if hasattr(st.session_state, 'preCServ') and not hasattr(st.session_state, 'pre_service'):
@@ -109,10 +139,12 @@ def service_changed():
     
     on_surf_raster_source_change()
 
+
 def surf_raster_source_uploaded():
     if hasattr(st.session_state, 'surf_rast_ul'):
         st.session_state.surf_rast_ul_obj = copy.deepcopy(st.session_state.surf_rast_ul)
     on_surf_raster_source_change()
+ 
     
 def on_surf_raster_source_change():
     rType = st.session_state.surf_raster_type
@@ -154,23 +186,64 @@ def w4hrun():
     stss = st.session_state
     st.toast('Processing')
 
-    specified_params = ['well_data', 'surf_elev_grid', 'bedrock_elev_grid', 'model_grid']
+    specified_params_dict = {'well_data':'well_data',
+                        'surf_elev_grid':'surf_raster_source', 
+                        'bedrock_elev_grid':'lower_rast_TEXT', 
+                        'model_grid':'model_grid_TEXT',
+                        'study_area':'study_area_TEXT'}
     # Code to read in well_data file
     # FIX THIS
-    well_data = pd.read_csv(stss.well_data)
 
+    #if st.session_state.demo_check:
+    #    RESOURCES = w4h.get_resources(scope='local')
+    #    st.session_state.well_data = RESOURCES['well_data'].as_posix()
+
+
+    surf_elev = None
     if stss.surf_raster_type == 'File':
         pass
         # Code to read in file
         stss.surf_elev_grid = None
     else:
         # Code to read in service
-        pass
-        stss.surf_elev_grid = None
+        if 'ISGS' in st.session_state.pre_service:
+            elevation_source = st.session_state.surf_raster_source
+            wms = WebMapService(elevation_source)
+
+            bboxFile = gpd.read_file(RESOURCES['study_area'])
+            bboxFile = bboxFile.to_crs('EPSG:4326')
+            bboxFile = bboxFile.bounds
+            bbox = bboxFile.values.tolist()[0]
+
+            img = wms.getmap(
+                layers=['IL_Statewide_Lidar_DEM_WGS:None'],
+                srs='EPSG:4326',
+                bbox=bbox,
+                size=(256, 256),
+                format='image/tiff',
+                transparent=True
+                )
+
+            bio = io.BytesIO(img.read())
+            elevData_rxr = rxr.open_rasterio(bio)
+            elevData_rxr = elevData_rxr.rio.write_crs('EPSG:4326')
+            #elevData_rxr = elevData_rxr.isel(band=0)
+
+            output_crs = "EPSG:4326"
+            surf_elev = elevData_rxr.rio.reproject(output_crs)
+        else:
+            surf_elev = None
 
     # Code to read in lower surface elevation
     # Fix this to get it working with actual file, not just text
-    stss.bedrock_elev_grid = rxr.open_rasterio(stss.lower_rast_TEXT)
+    br_elev = None
+    if '.tif' in str(stss.lower_rast_TEXT):
+        stss.lower_rast_TEXT = pathlib.Path(stss.lower_rast_TEXT).with_suffix('.TIF').as_posix()
+        br_elev = rxr.open_rasterio(stss.lower_rast_TEXT).rio.reproject('EPSG:4326')
+
+    if '.tif' in str(stss.model_grid_TEXT):
+        stss.model_grid_TEXT = pathlib.Path(stss.model_grid_TEXT).with_suffix('.TIF').as_posix()
+
 
     # Get model grid
     if 'node' in str(stss.model_type).lower():
@@ -187,23 +260,45 @@ def w4hrun():
         # FIX THIS
         stss.model_grid = rxr.open_rasterio(stss.model_grid_TEXT)
     
+    # Add non-default params to kwargs
     w4hrun_kwargs = {}
     for paramName, defaultVal in stss.param_defaults.items():
-        if paramName not in specified_params:
+        if paramName not in specified_params_dict:
             if hasattr(st.session_state, paramName):
                 if stss[paramName] != defaultVal:
                     w4hrun_kwargs[paramName] = stss[paramName]
     
-    # Code to print out what is not default value
+    # (Eventually) Code to print out what is not default value
 
     # Specify unmodifiable kwargs
-    static_kws = ['well_data', 'surf_elev_grid', 'bedrock_elev_grid', 'model_grid']
-    for kw in static_kws:
-        w4hrun_kwargs[kw] = stss['kw']
+    if surf_elev is not None:
+        del specified_params_dict['surf_elev_grid']
+        w4hrun_kwargs['surf_elev_grid'] = surf_elev
+        #st.write(surf_elev['spatial_ref'])
+    if br_elev is not None:
+        del specified_params_dict['bedrock_elev_grid']
+        w4hrun_kwargs['bedrock_elev_grid'] = br_elev
+
+    for kw, stsskw in specified_params_dict.items():
+        w4hrun_kwargs[kw] = stss[stsskw]
+    w4hrun_kwargs['verbose'] = True
+
+    # Run the processing
     with st.spinner('Processing data', show_time=True):
-        st.status('Running')
-        st.session_state.results = w4h.run(**w4hrun_kwargs)
-    st.success()
+        #st.write(w4hrun_kwargs)
+        with st.status('Running'):
+            try:
+                st.session_state.results = w4h.run(**w4hrun_kwargs)
+            except Exception as e:
+                st.error(e)
+                print(e)
+                st.session_state.results = None
+    st.success('Processing complete')
+    #st.write(st.session_state.results)
+    fig, ax = plt.subplots(figsize=(10,10))
+    st.session_state.results[1]['Model_Layers'][0].plot(ax=ax)    
+    st.pyplot(fig)
+
 
 def main():
 
@@ -295,6 +390,9 @@ def main():
             brval = None
             if hasattr(st.session_state, 'lower_rast_UL') and st.session_state.lower_rast_UL is not None:
                 brval = st.session_state.lower_rast_UL.name
+            if hasattr(st.session_state, 'lower_rast_TEXT'):
+                st.session_state.lower_rast_TEXT = pathlib.Path(st.session_state.lower_rast_TEXT).as_posix()
+                brval = st.session_state.lower_rast_TEXT
             brtab.text_input(label="Lower Raster File", value=brval, key='lower_rast_TEXT')
             brtab.file_uploader(label='Upload Lower Elevation Raster', key='lower_rast_UL')
 
