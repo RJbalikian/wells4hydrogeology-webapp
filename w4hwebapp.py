@@ -43,6 +43,9 @@ RESOURCES = w4h.get_resources(scope='local')
 
 VERBOSE = False
 
+if not hasattr(st.session_state, 'initial_setup'):
+    st.session_state.initial_setup = True
+
 def get_defaults():
     w4h_funs = [w4h.file_setup, w4h.read_raw_csv, w4h.define_dtypes, w4h.merge_metadata, w4h.coords2geometry,
                 w4h.read_study_area, w4h.clip_gdf2study_area, w4h.read_grid, w4h.add_control_points,
@@ -178,7 +181,6 @@ def on_surf_raster_source_change():
     #st.write(st.session_state.surf_raster_type)
 
     if rType == "File":
-        print("FILE")
         if not hasattr(st.session_state, 'surf_rast_ul') and  hasattr(st.session_state, 'surf_rast_ul_name'):
             st.session_state.surf_raster_source = pathlib.Path(st.session_state.surf_rast_ul_name).as_posix()
 
@@ -334,7 +336,6 @@ def w4hrun():
     w4hrun_kwargs = {}
     for paramName, defaultVal in stss.param_defaults.items():
         if paramName not in specified_params_dict:
-        if paramName not in specified_params_dict:
             if hasattr(st.session_state, paramName):
                 if stss[paramName] != defaultVal:
                     w4hrun_kwargs[paramName] = stss[paramName]
@@ -405,6 +406,11 @@ def main():
                        menu_items={"Get Help":'https://github.com/RJbalikian/wells4hydrogeology/wiki',
                                     "Report a bug":"https://github.com/RJbalikian/wells4hydrogeology/issues",
                                     'About':"W4H is a collaboration between the Illinois State Water Survey and the Illinois State Geological Survey"})
+
+    if st.session_state.initial_setup:
+        st.info('This web app is in beta. Check the "Demo run" box to use demonstration data.')
+        st.session_state.initial_setup = False
+
     with st.sidebar:
         sampleCol, headerCol  = st.columns([0.7, 0.3], vertical_alignment='top')
         with headerCol.container(horizontal_alignment='right'):
